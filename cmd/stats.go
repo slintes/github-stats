@@ -30,11 +30,16 @@ type AllStats map[time.Month]*Stats
 
 func Run() {
 
+	user := flag.String("user", "", "Your github hanlde.")
 	token := flag.String("token", "", "Your github token.")
 	reposToInspect := flag.String("repositories", "", "Comma separated list of github repositories to inspect, in org/name format.")
 	nrMonths := flag.Int("months", 2, "Nr of months to look back; 1 = current month, 2 = current + last, and so on. Defaults to 2.")
 
 	flag.Parse()
+
+	if user == nil || *user == "" {
+		panic("missing user flag")
+	}
 
 	if token == nil || *token == "" {
 		panic("missing token flag")
@@ -114,7 +119,7 @@ func Run() {
 						month := pr.MergedAt.Month()
 						stats := getStatsForMonth(allStats, month)
 
-						if *pr.User.Login == "slintes" {
+						if *pr.User.Login == *user {
 							stats.ownMerged = append(stats.ownMerged, statsPR)
 							fmt.Printf("    ownMerged by me: %v\n", *pr.Title)
 							continue
@@ -125,7 +130,7 @@ func Run() {
 						if err != nil {
 							panic(err)
 						}
-						if *pr.MergedBy.Login == "slintes" {
+						if *pr.MergedBy.Login == *user {
 							stats.merged = append(stats.merged, statsPR)
 							fmt.Printf("    merged by me: %v\n", *pr.Title)
 							continue
@@ -133,7 +138,7 @@ func Run() {
 					}
 
 					// ignore my open PRs
-					if *pr.User.Login == "slintes" {
+					if *pr.User.Login == *user {
 						fmt.Printf("  skipping my own open PR: %v\n", *pr.Title)
 						continue
 					}
@@ -150,7 +155,7 @@ func Run() {
 						}
 						reviewsNextPage = rResponse.NextPage
 						for _, review := range reviews {
-							if *review.User.Login == "slintes" {
+							if *review.User.Login == *user {
 
 								// nil for pending reviews
 								if review.SubmittedAt == nil || (*review.SubmittedAt).Before(limit) {
@@ -183,7 +188,7 @@ func Run() {
 						}
 						commentsNextPage = cResponse.NextPage
 						for _, comment := range comments {
-							if *comment.User.Login == "slintes" {
+							if *comment.User.Login == *user {
 
 								if (*comment.CreatedAt).Before(limit) {
 									continue
