@@ -14,15 +14,17 @@ import (
 )
 
 type PR struct {
-	repo  string
-	nr    int
-	title string
+	repo          string
+	nr            int
+	title         string
+	monthMerged   time.Month
+	monthReviewed []time.Month
 }
 
 type Stats struct {
 	month     time.Month
 	ownMerged []*PR
-	commented []*PR
+	reviewed  []*PR
 	merged    []*PR
 }
 
@@ -94,7 +96,7 @@ func Run() {
 
 				for _, pr := range prs {
 
-					fmt.Printf("pr nr %v, state %v, updated %v\n", *pr.Number, *pr.State, pr.UpdatedAt.String())
+					fmt.Printf("pr nr %v, state %v: %v\n", *pr.Number, *pr.State, *pr.Title)
 
 					// ignore PRs older than nrMonth
 					if (*pr.UpdatedAt).Before(limit) {
@@ -103,12 +105,13 @@ func Run() {
 					}
 
 					statsPR := &PR{
-						repo:  *repo.Name,
-						nr:    *pr.Number,
-						title: *pr.Title,
+						repo:          *repo.Name,
+						nr:            *pr.Number,
+						title:         *pr.Title,
+						monthReviewed: make([]time.Month, 0),
 					}
 
-					// find merged PRs ownMerged or merged by me
+					// find merged PRs
 					if pr.MergedAt != nil {
 						if (*pr.MergedAt).Before(limit) {
 							continue
@@ -117,29 +120,29 @@ func Run() {
 						fmt.Println("  is merged")
 
 						month := pr.MergedAt.Month()
-						stats := getStatsForMonth(allStats, month)
 
 						if *pr.User.Login == *user {
+							// my own PR
+							stats := getStatsForMonth(allStats, month)
 							stats.ownMerged = append(stats.ownMerged, statsPR)
-							fmt.Printf("    ownMerged by me: %v\n", *pr.Title)
+							fmt.Printf("    own merged in %v\n", month)
 							continue
 						}
 
 						// get PR in order to get mergedBy
-						pr, _, err := client.PullRequests.Get(ctx, *repo.Owner.Login, *repo.Name, *pr.Number)
+						pr, _, err = client.PullRequests.Get(ctx, *repo.Owner.Login, *repo.Name, *pr.Number)
 						if err != nil {
 							panic(err)
 						}
 						if *pr.MergedBy.Login == *user {
-							stats.merged = append(stats.merged, statsPR)
-							fmt.Printf("    merged by me: %v\n", *pr.Title)
-							continue
+							// merged by me
+							statsPR.monthMerged = month
 						}
 					}
 
 					// ignore my open PRs
 					if *pr.User.Login == *user {
-						fmt.Printf("  skipping my own open PR: %v\n", *pr.Title)
+						fmt.Printf("  skipping my own open PR\n")
 						continue
 					}
 
@@ -163,10 +166,8 @@ func Run() {
 								}
 
 								month := review.SubmittedAt.Month()
-								stats := getStatsForMonth(allStats, month)
-								if !containsPR(stats.commented, statsPR) {
-									stats.commented = append(stats.commented, statsPR)
-									fmt.Printf("    reviewed by me: %v\n", *pr.Title)
+								if !containsMonth(statsPR.monthReviewed, month) {
+									statsPR.monthReviewed = append(statsPR.monthReviewed, month)
 								}
 							}
 						}
@@ -175,8 +176,8 @@ func Run() {
 					// also check normal comments
 					commentsNextPage := 1
 					for commentsNextPage != 0 {
-						comments, cResponse, err := client.PullRequests.ListComments(ctx, *repo.Owner.Login, *repo.Name, *pr.Number, &github.PullRequestListCommentsOptions{
-							Sort:      "ownMerged",
+						comments, cResponse, err := client.Issues.ListComments(ctx, *repo.Owner.Login, *repo.Name, *pr.Number, &github.IssueListCommentsOptions{
+							Sort:      "created",
 							Direction: "decs",
 							ListOptions: github.ListOptions{
 								Page:    commentsNextPage,
@@ -195,12 +196,32 @@ func Run() {
 								}
 
 								month := comment.CreatedAt.Month()
-								stats := getStatsForMonth(allStats, month)
-								if !containsPR(stats.commented, statsPR) {
-									stats.commented = append(stats.commented, statsPR)
-									fmt.Printf("    commented by me: %v\n", *pr.Title)
+								// count approvals as merged
+								if strings.Contains(*comment.Body, "/approve") && statsPR.monthMerged == 0 {
+									statsPR.monthMerged = month
+								} else {
+									if !containsMonth(statsPR.monthReviewed, month) {
+										statsPR.monthReviewed = append(statsPR.monthReviewed, month)
+									}
 								}
+
 							}
+						}
+					}
+
+					if statsPR.monthMerged != 0 {
+						stats := getStatsForMonth(allStats, statsPR.monthMerged)
+						if !containsPR(stats.merged, statsPR) {
+							stats.merged = append(stats.merged, statsPR)
+							fmt.Printf("    merged or approved by me in %v\n", statsPR.monthMerged)
+						}
+					}
+
+					for _, m := range statsPR.monthReviewed {
+						stats := getStatsForMonth(allStats, m)
+						if !containsPR(stats.reviewed, statsPR) && statsPR.monthMerged != m {
+							stats.reviewed = append(stats.reviewed, statsPR)
+							fmt.Printf("    reviewed by me in %v\n", m)
 						}
 					}
 				}
@@ -228,11 +249,11 @@ func Run() {
 		fmt.Printf("  own merged: %v\n", len(stats.ownMerged))
 		printPrs(stats.ownMerged)
 
-		fmt.Printf("  merged: %v\n", len(stats.merged))
+		fmt.Printf("  merged/approved: %v\n", len(stats.merged))
 		printPrs(stats.merged)
 
-		fmt.Printf("  reviewed: %v\n", len(stats.commented))
-		printPrs(stats.commented)
+		fmt.Printf("  reviewed: %v\n", len(stats.reviewed))
+		printPrs(stats.reviewed)
 	}
 }
 
@@ -258,7 +279,7 @@ func getStatsForMonth(allStats AllStats, month time.Month) *Stats {
 		stats = &Stats{
 			month:     month,
 			ownMerged: make([]*PR, 0),
-			commented: make([]*PR, 0),
+			reviewed:  make([]*PR, 0),
 			merged:    make([]*PR, 0),
 		}
 		allStats[month] = stats
@@ -269,6 +290,15 @@ func getStatsForMonth(allStats AllStats, month time.Month) *Stats {
 func containsPR(prs []*PR, pr *PR) bool {
 	for _, thisPR := range prs {
 		if reflect.DeepEqual(thisPR, pr) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsMonth(months []time.Month, month time.Month) bool {
+	for _, m := range months {
+		if m == month {
 			return true
 		}
 	}

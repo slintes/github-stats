@@ -5,9 +5,9 @@ Atm it will report
 
 - how many PRs of you are merged
 - how many PRs are merged by you (also takes `/approve` comments into account)
-- how mant PRs are reviewed by you (via gitgub review functionality or just normal comment)
+- how many PRs are reviewed by you (via gitgub review functionality or just normal comment)
 
-PRs falling into one category are not counted for the ones anymore, so e.g. PRs merged will not be counted as PRs reviewed.
+PRs falling into one category are not counted for the ones anymore in the same month, so e.g. PRs merged will not be counted as PRs reviewed as well.
 
 # Usage
 
@@ -16,7 +16,7 @@ PRs falling into one category are not counted for the ones anymore, so e.g. PRs 
 - `githubUser` = the user for which stats are collected
 - `githubToken` = a token for acessing the github API
 - `nrMonths` = the nr of month to go backwards
-- `reposirories` = a commas separated list of repositories in org/name format
+- `repositories` = a commas separated list of repositories in org/name format
 
 # Development
 
